@@ -1881,7 +1881,7 @@ subroutine MOM_temp_salt_initialize_from_Z(h, tv, G, GV, PF, just_read_params)
   character(len=200) :: shelf_file !< The name of an input file used for  ice shelf area.
   character(len=200) :: inputdir   !! The directory where NetCDF input filesare.
   character(len=200) :: mesg, area_varname, ice_shelf_file
-
+  logical            :: z_is_on_grid !< If true, the initial condition horizontal grid is identical to the model grid
   type(EOS_type), pointer :: eos => NULL()
 
 ! This include declares and sets the variable "version".
@@ -1976,6 +1976,10 @@ subroutine MOM_temp_salt_initialize_from_Z(h, tv, G, GV, PF, just_read_params)
                  "temperatures (T) and salinities (S). If T and S are not \n" //&
                  "in the same file, TEMP_Z_INIT_FILE and SALT_Z_INIT_FILE \n" //&
                  "must be set.",default="temp_salt_z.nc",do_not_log=just_read)
+  z_is_on_grid = .false.
+  call get_param(PF, mdl, "Z_INIT_ON_GRID",z_is_on_grid, &
+                 "If true, the initial condition Z file horizontal grid is \n"//&
+                 "identical to the model grid" ,default=.false.)
   call get_param(PF, mdl, "TEMP_Z_INIT_FILE",tfilename, &
                  "The name of the z-space input file used to initialize \n"//&
                  "temperatures, only.", default=trim(filename),do_not_log=just_read)
@@ -2056,10 +2060,10 @@ subroutine MOM_temp_salt_initialize_from_Z(h, tv, G, GV, PF, just_read_params)
 !   value at the northernmost/southernmost latitude.
 
   call horiz_interp_and_extrap_tracer(tfilename, potemp_var,1.0,1, &
-       G, temp_z, mask_z, z_in, z_edges_in, missing_value_temp, reentrant_x, tripolar_n, homogenize)
+       G, temp_z, mask_z, z_in, z_edges_in, missing_value_temp, reentrant_x, tripolar_n, homogenize,z_is_on_grid)
 
   call horiz_interp_and_extrap_tracer(sfilename, salin_var,1.0,1, &
-       G, salt_z, mask_z, z_in, z_edges_in, missing_value_salt, reentrant_x, tripolar_n, homogenize)
+       G, salt_z, mask_z, z_in, z_edges_in, missing_value_salt, reentrant_x, tripolar_n, homogenize,z_is_on_grid)
 
   kd = size(z_in,1)
 

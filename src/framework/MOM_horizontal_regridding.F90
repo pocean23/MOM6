@@ -259,7 +259,7 @@ subroutine fill_miss_2d(aout,good,fill,prev,G,smooth,num_pass,relc,crit,keep_bug
 end subroutine fill_miss_2d
 
 subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, recnum, G, tr_z, mask_z, z_in, &
-                                                z_edges_in, missing_value, reentrant_x, tripolar_n, homogenize )
+                                                z_edges_in, missing_value, reentrant_x, tripolar_n, homogenize, on_grid )
 
   character(len=*),      intent(in)    :: filename   !< Path to file containing tracer to be
                                                      !! interpolated.
@@ -276,6 +276,8 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
   real,                  intent(out)   :: missing_value
   logical,               intent(in)    :: reentrant_x, tripolar_n
   logical, intent(in),   optional      :: homogenize
+  logical, intent(in),   optional      :: on_grid    !< If true, input data are assumed to lie on the model grid
+
 
   real, dimension(:,:),  allocatable   :: tr_in,tr_inp !< A 2-d array for holding input data on
                                                      !! native horizontal grid and extended grid
@@ -302,6 +304,7 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
   integer :: id_clock_read
   character(len=12)  :: dim_name(4)
   logical :: debug=.false.
+  logical :: is_on_grid
   real :: npoints,varAvg
   real, dimension(SZI_(G),SZJ_(G)) :: lon_out, lat_out, tr_out, mask_out
   real, dimension(SZI_(G),SZJ_(G)) :: good, fill
@@ -393,21 +396,41 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
 
 ! extrapolate the input data to the north pole using the northerm-most latitude
 
-  max_lat = maxval(lat_in)
-  add_np=.false.
-  if (max_lat < 90.0) then
-    add_np=.true.
-    jdp=jd+1
-    allocate(lat_inp(jdp))
-    lat_inp(1:jd)=lat_in(:)
-    lat_inp(jd+1)=90.0
-    deallocate(lat_in)
-    allocate(lat_in(1:jdp))
-    lat_in(:)=lat_inp(:)
-  else
-    jdp=jd
-  endif
+  is_on_grid = .false.
+  if (present(on_grid)) is_on_grid = on_grid
 
+
+  if (.not. is_on_grid) then
+    max_lat = maxval(lat_in)
+    add_np=.false.
+    if (max_lat < 90.0) then
+      add_np=.true.
+      jdp=jd+1
+      allocate(lat_inp(jdp))
+      lat_inp(1:jd)=lat_in(:)
+      lat_inp(jd+1)=90.0
+      deallocate(lat_in)
+      allocate(lat_in(1:jdp))
+      lat_in(:)=lat_inp(:)
+    else
+      jdp=jd
+    endif
+
+    call horiz_interp_init()
+
+    lon_in = lon_in*PI_180
+    lat_in = lat_in*PI_180
+    allocate(x_in(id,jdp),y_in(id,jdp))
+    call meshgrid(lon_in,lat_in, x_in, y_in)
+
+    lon_out(:,:) = G%geoLonT(:,:)*PI_180
+    lat_out(:,:) = G%geoLatT(:,:)*PI_180
+
+    allocate(tr_in(id,jd)) ; tr_in(:,:)=0.0
+    allocate(tr_inp(id,jdp)) ; tr_inp(:,:)=0.0
+    allocate(mask_in(id,jdp)) ; mask_in(:,:)=0.0
+    allocate(last_row(id))    ; last_row(:)=0.0
+  endif
 ! construct level cell boundaries as the mid-point between adjacent centers
 
   z_edges_in(1) = 0.0
@@ -415,22 +438,6 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
    z_edges_in(k)=0.5*(z_in(k-1)+z_in(k))
   enddo
   z_edges_in(kd+1)=2.0*z_in(kd) - z_in(kd-1)
-
-  call horiz_interp_init()
-
-  lon_in = lon_in*PI_180
-  lat_in = lat_in*PI_180
-  allocate(x_in(id,jdp),y_in(id,jdp))
-  call meshgrid(lon_in,lat_in, x_in, y_in)
-
-  lon_out(:,:) = G%geoLonT(:,:)*PI_180
-  lat_out(:,:) = G%geoLatT(:,:)*PI_180
-
-
-  allocate(tr_in(id,jd)) ; tr_in(:,:)=0.0
-  allocate(tr_inp(id,jdp)) ; tr_inp(:,:)=0.0
-  allocate(mask_in(id,jdp)) ; mask_in(:,:)=0.0
-  allocate(last_row(id))    ; last_row(:)=0.0
 
   max_depth = maxval(G%bathyT)
   call mpp_max(max_depth)
@@ -444,134 +451,137 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
 
   roundoff = 3.0*EPSILON(missing_value)
 
+  if (.not. is_on_grid) then
+    do k=1,kd
+      write(laynum,'(I8)') k ; laynum = adjustl(laynum)
 
-  do k=1,kd
-    write(laynum,'(I8)') k ; laynum = adjustl(laynum)
-
-    if (is_root_pe()) then
-      start = 1; start(3) = k; count = 1; count(1) = id; count(2) = jd
-      rcode = NF90_GET_VAR(ncid,varid, tr_in, start, count)
-      if (rcode .ne. 0) call MOM_error(FATAL,"hinterp_and_extract_from_Fie: "//&
+      if (is_root_pe()) then
+        start = 1; start(3) = k; count = 1; count(1) = id; count(2) = jd
+        rcode = NF90_GET_VAR(ncid,varid, tr_in, start, count)
+        if (rcode .ne. 0) call MOM_error(FATAL,"hinterp_and_extract_from_Fie: "//&
            "error reading level "//trim(laynum)//" of variable "//&
            trim(varnam)//" in file "// trim(filename))
 
-      if (add_np) then
-         last_row(:)=tr_in(:,jd); pole=0.0;npole=0.0
-         do i=1,id
+        if (add_np) then
+          last_row(:)=tr_in(:,jd); pole=0.0;npole=0.0
+          do i=1,id
             if (abs(tr_in(i,jd)-missing_value) .gt. abs(roundoff*missing_value)) then
                pole = pole+last_row(i)
                npole = npole+1.0
             endif
-         enddo
-         if (npole > 0) then
+          enddo
+          if (npole > 0) then
             pole=pole/npole
-         else
+          else
             pole=missing_value
-         endif
-         tr_inp(:,1:jd) = tr_in(:,:)
-         tr_inp(:,jdp) = pole
-      else
-         tr_inp(:,:) = tr_in(:,:)
+          endif
+          tr_inp(:,1:jd) = tr_in(:,:)
+          tr_inp(:,jdp) = pole
+        else
+          tr_inp(:,:) = tr_in(:,:)
+        endif
       endif
 
-    endif
+      call mpp_sync()
+      call mpp_broadcast(tr_inp,id*jdp,root_PE())
+      call mpp_sync_self ()
 
-    call mpp_sync()
-    call mpp_broadcast(tr_inp,id*jdp,root_PE())
-    call mpp_sync_self ()
+      mask_in=0.0
 
-    mask_in=0.0
-
-    do j=1,jdp
-      do i=1,id
-         if (abs(tr_inp(i,j)-missing_value) .gt. abs(roundoff*missing_value)) then
-           mask_in(i,j)=1.0
+      do j=1,jdp
+        do i=1,id
+          if (abs(tr_inp(i,j)-missing_value) .gt. abs(roundoff*missing_value)) then
+            mask_in(i,j)=1.0
             tr_inp(i,j) = tr_inp(i,j) * conversion
-         else
-           tr_inp(i,j)=missing_value
-         endif
+          else
+            tr_inp(i,j)=missing_value
+          endif
+        enddo
       enddo
-    enddo
 
 
 ! call fms routine horiz_interp to interpolate input level data to model horizontal grid
 
 
-    if (k == 1) then
-      call horiz_interp_new(Interp,x_in,y_in,lon_out(is:ie,js:je),lat_out(is:ie,js:je), &
+      if (k == 1) then
+        call horiz_interp_new(Interp,x_in,y_in,lon_out(is:ie,js:je),lat_out(is:ie,js:je), &
                interp_method='bilinear',src_modulo=reentrant_x)
-    endif
+      endif
 
-    if (debug) then
-       call myStats(tr_inp,missing_value, is,ie,js,je,k,'Tracer from file')
-    endif
+      if (debug) then
+        call myStats(tr_inp,missing_value, is,ie,js,je,k,'Tracer from file')
+      endif
 
-    tr_out(:,:) = 0.0
+      tr_out(:,:) = 0.0
 
-    call horiz_interp(Interp,tr_inp,tr_out(is:ie,js:je), missing_value=missing_value, new_missing_handle=.true.)
+      call horiz_interp(Interp,tr_inp,tr_out(is:ie,js:je), missing_value=missing_value, new_missing_handle=.true.)
 
-    mask_out=1.0
-    do j=js,je
-      do i=is,ie
-        if (abs(tr_out(i,j)-missing_value) .lt. abs(roundoff*missing_value)) mask_out(i,j)=0.
+      mask_out=1.0
+      do j=js,je
+        do i=is,ie
+          if (abs(tr_out(i,j)-missing_value) .lt. abs(roundoff*missing_value)) mask_out(i,j)=0.
+        enddo
       enddo
-    enddo
 
-    fill = 0.0; good = 0.0
+      fill = 0.0; good = 0.0
 
-    nPoints = 0 ; varAvg = 0.
-    do j=js,je
-      do i=is,ie
-        if (mask_out(i,j) .lt. 1.0) then
-          tr_out(i,j)=missing_value
-        else
-          good(i,j)=1.0
-          nPoints = nPoints + 1
-          varAvg = varAvg + tr_out(i,j)
-        endif
-        if (G%mask2dT(i,j) == 1.0 .and. z_edges_in(k) <= G%bathyT(i,j) .and. mask_out(i,j) .lt. 1.0) fill(i,j)=1.0
+      nPoints = 0 ; varAvg = 0.
+      do j=js,je
+        do i=is,ie
+          if (mask_out(i,j) .lt. 1.0) then
+            tr_out(i,j)=missing_value
+          else
+            good(i,j)=1.0
+            nPoints = nPoints + 1
+            varAvg = varAvg + tr_out(i,j)
+          endif
+          if (G%mask2dT(i,j) == 1.0 .and. z_edges_in(k) <= G%bathyT(i,j) .and. mask_out(i,j) .lt. 1.0) fill(i,j)=1.0
+        enddo
       enddo
-    enddo
-    call pass_var(fill,G%Domain)
-    call pass_var(good,G%Domain)
+      call pass_var(fill,G%Domain)
+      call pass_var(good,G%Domain)
 
-    if (debug) then
-      call myStats(tr_out,missing_value, is,ie,js,je,k,'variable from horiz_interp()')
-    endif
+      if (debug) then
+        call myStats(tr_out,missing_value, is,ie,js,je,k,'variable from horiz_interp()')
+      endif
 
     ! Horizontally homogenize data to produce perfectly "flat" initial conditions
-    if (PRESENT(homogenize)) then
-       if (homogenize) then
-          call sum_across_PEs(nPoints)
-          call sum_across_PEs(varAvg)
-          if (nPoints>0) then
+      if (PRESENT(homogenize)) then
+         if (homogenize) then
+           call sum_across_PEs(nPoints)
+           call sum_across_PEs(varAvg)
+           if (nPoints>0) then
              varAvg = varAvg/real(nPoints)
-          endif
-          tr_out(:,:) = varAvg
-       endif
-    endif
+           endif
+           tr_out(:,:) = varAvg
+         endif
+      endif
 
 ! tr_out contains input z-space data on the model grid with missing values
 ! now fill in missing values using "ICE-nine" algorithm.
 
-    tr_outf(:,:)=tr_out(:,:)
-    if (k==1) tr_prev(:,:)=tr_outf(:,:)
-    good2(:,:)=good(:,:)
-    fill2(:,:)=fill(:,:)
+      tr_outf(:,:)=tr_out(:,:)
+      if (k==1) tr_prev(:,:)=tr_outf(:,:)
+      good2(:,:)=good(:,:)
+      fill2(:,:)=fill(:,:)
+      call fill_miss_2d(tr_outf,good2,fill2,tr_prev,G,smooth=.true.)
+      call myStats(tr_outf,missing_value,is,ie,js,je,k,'field from fill_miss_2d()')
+      tr_z(:,:,k) = tr_outf(:,:)*G%mask2dT(:,:)
+      mask_z(:,:,k) = good2(:,:)+fill2(:,:)
+      tr_prev(:,:)=tr_z(:,:,k)
 
-    call fill_miss_2d(tr_outf,good2,fill2,tr_prev,G,smooth=.true.)
-    call myStats(tr_outf,missing_value,is,ie,js,je,k,'field from fill_miss_2d()')
+      if (debug) then
+        call hchksum(tr_prev,'field after fill ',G%HI)
+      endif
 
-    tr_z(:,:,k) = tr_outf(:,:)*G%mask2dT(:,:)
-    mask_z(:,:,k) = good2(:,:)+fill2(:,:)
-
-    tr_prev(:,:)=tr_z(:,:,k)
-
-    if (debug) then
-      call hchksum(tr_prev,'field after fill ',G%HI)
-    endif
-
-  enddo ! kd
+    enddo ! kd
+  else
+  ! If input data are on grid, then just read directly
+    call read_data(filename,varnam,tr_z,domain=G%domain%mpp_domain,timelevel=1)
+    do j=jsd,jed; do i=isd,ied
+      tr_z(i,j,:) = tr_z(i,j,:)*G%mask2dT(i,j)
+    enddo; enddo
+  endif
 
 end subroutine horiz_interp_and_extrap_tracer_record
 
@@ -774,9 +784,9 @@ subroutine horiz_interp_and_extrap_tracer_fms_id(fms_id,  Time, conversion, G, t
                interp_method='bilinear',src_modulo=reentrant_x)
     endif
 
-!    if (debug) then
+    if (debug) then
        call myStats(tr_in,missing_value, 1,id,1,jd,k,'Tracer from file')
-!    endif
+    endif
 
     tr_out(:,:) = 0.0
 
