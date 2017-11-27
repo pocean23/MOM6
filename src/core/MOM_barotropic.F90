@@ -353,7 +353,9 @@ type, public :: barotropic_CS ; private
   integer :: id_BTC_FA_v_NN = -1, id_BTC_FA_v_N0 = -1, id_BTC_FA_v_S0 = -1, id_BTC_FA_v_SS = -1
   integer :: id_BTC_vbt_NN = -1, id_BTC_vbt_SS = -1
   integer :: id_uhbt0 = -1, id_vhbt0 = -1
-
+  integer :: id_eta_outer_u = -1, id_eta_outer_v = -1
+  integer :: id_ubt_outer = -1, id_vbt_outer = -1
+  integer :: id_cg_u = -1, id_cg_v = -1
 end type barotropic_CS
 
 type, private :: local_BT_cont_u_type
@@ -1988,6 +1990,15 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, &
     endif
 
   enddo ! end of do n=1,ntimestep
+
+  if (CS%id_eta_outer_u>0) call post_data(CS%id_eta_outer_u,CS%BT_OBC%eta_outer_u(IsdB:IedB,jsd:jed),CS%diag)
+  if (CS%id_eta_outer_v>0) call post_data(CS%id_eta_outer_v,CS%BT_OBC%eta_outer_v(isd:ied,JsdB:JedB),CS%diag)
+  if (CS%id_ubt_outer>0) call post_data(CS%id_ubt_outer,CS%BT_OBC%ubt_outer(IsdB:IedB,jsd:jed),CS%diag)
+  if (CS%id_vbt_outer>0) call post_data(CS%id_vbt_outer,CS%BT_OBC%vbt_outer(isd:ied,JsdB:JedB),CS%diag)
+  if (CS%id_cg_u>0) call post_data(CS%id_cg_u,CS%BT_OBC%Cg_u(IsdB:IedB,jsd:jed),CS%diag)
+  if (CS%id_cg_v>0) call post_data(CS%id_cg_v,CS%BT_OBC%Cg_v(isd:ied,JsdB:JedB),CS%diag)
+
+
   if (id_clock_calc > 0) call cpu_clock_end(id_clock_calc)
   if (id_clock_calc_post > 0) call cpu_clock_begin(id_clock_calc_post)
 
@@ -3871,7 +3882,7 @@ end subroutine bt_mass_source
 !! barotropic calculation and initializes any barotropic fields that have not
 !! already been initialized.
 subroutine barotropic_init(u, v, h, eta, Time, G, GV, param_file, diag, CS, &
-                           restart_CS, BT_cont, tides_CSp)
+                           restart_CS, BT_cont, tides_CSp, OBC)
   type(ocean_grid_type),            intent(inout) :: G          !< The ocean's grid structure.
   type(verticalGrid_type),          intent(in)    :: GV         !< The ocean's vertical grid structure.
   real, intent(in), dimension(SZIB_(G),SZJ_(G),SZK_(G)) :: u    !< The zonal velocity, in m s-1.
@@ -3891,7 +3902,7 @@ subroutine barotropic_init(u, v, h, eta, Time, G, GV, param_file, diag, CS, &
                                                                 !! barotropic flow.
   type(tidal_forcing_CS), optional, pointer       :: tides_CSp  !< A pointer to the control structure of the tide
                                                                 !! module.
-
+  type(ocean_OBC_type),             pointer       :: OBC        !< points to OBC related fields
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
   ! Local variables
@@ -4382,6 +4393,21 @@ subroutine barotropic_init(u, v, h, eta, Time, G, GV, param_file, diag, CS, &
       'Barotropic zonal transport difference', 'm3 s-1')
   CS%id_vhbt0 = register_diag_field('ocean_model', 'vhbt0', diag%axesCv1, Time, &
       'Barotropic meridional transport difference', 'm3 s-1')
+
+  if (associated(OBC)) then
+    CS%id_eta_outer_u = register_diag_field('ocean_model', 'eta_outer_u', diag%axesCu1, Time, &
+      'Outer surface elevation at open boundaries', 'm')
+    CS%id_eta_outer_v = register_diag_field('ocean_model', 'eta_outer_v', diag%axesCv1, Time, &
+      'Outer surface elevation at open boundaries', 'm')
+    CS%id_ubt_outer = register_diag_field('ocean_model', 'ubt_outer', diag%axesCu1, Time, &
+      'Outer barotropic velocity at open boundaries', 'm s-1')
+    CS%id_vbt_outer = register_diag_field('ocean_model', 'vbt_outer', diag%axesCv1, Time, &
+      'Outer batortopic velocity at open boundaries', 'm s-1')
+    CS%id_cg_u = register_diag_field('ocean_model', 'cg_u', diag%axesCu1, Time, &
+      'Outer barotropic phase velocity at open boundaries', 'm s-1')
+    CS%id_cg_v = register_diag_field('ocean_model', 'cg_v', diag%axesCv1, Time, &
+      'Outer batortopic phase velocity at open boundaries', 'm s-1')
+  endif
 
   if (CS%id_frhatu1 > 0) call safe_alloc_ptr(CS%frhatu1, IsdB,IedB,jsd,jed,nz)
   if (CS%id_frhatv1 > 0) call safe_alloc_ptr(CS%frhatv1, isd,ied,JsdB,JedB,nz)

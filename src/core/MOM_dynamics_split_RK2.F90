@@ -1069,7 +1069,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, uh, vh, eta, Time, G, GV, param_fil
   do j=js,je ; do i=is,ie ; eta(i,j) = CS%eta(i,j) ; enddo ; enddo
 
   call barotropic_init(u, v, h, CS%eta, Time, G, GV, param_file, diag, &
-                       CS%barotropic_CSp, restart_CS, CS%BT_cont, CS%tides_CSp)
+                       CS%barotropic_CSp, restart_CS, CS%BT_cont, CS%tides_CSp, OBC)
 
   if (.not. query_initialized(CS%diffu,"diffu",restart_CS) .or. &
       .not. query_initialized(CS%diffv,"diffv",restart_CS)) &
