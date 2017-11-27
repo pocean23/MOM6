@@ -80,6 +80,10 @@ end type OBC_segment_data_type
 !> Tracer on OBC segment data structure, for putting into a segment tracer registry.
 type, public :: OBC_segment_tracer_type
   real, dimension(:,:,:), pointer :: t          => NULL()  !< tracer concentration array
+  real, dimension(:,:,:), pointer :: tres       => NULL()  !< tracer reservoir array
+  real, dimension(:,:,:), pointer :: volres       => NULL()  !< tracer reservoir volume (m3 or kg)
+  real                            :: Idamp_in         !< Inverse restoring timescale (s-1) for reservoir on inflow
+  real                            :: Idamp_out         !< Inverse restoring timescale (s-1) for reservoir on outflow
   real                            :: OBC_inflow_conc = 0.0 !< tracer concentration for generic inflows
   character(len=32)               :: name                  !< tracer name used for error messages
   type(vardesc), pointer          :: vd         => NULL()  !< metadata describing the tracer
@@ -209,6 +213,10 @@ type, public :: ocean_OBC_type
   real :: silly_u  !< A silly value of velocity outside of the domain that
                    !! can be used to test the independence of the OBCs to
                    !! this external data, in m/s.
+  real :: trestore_inflow_days  !< The timescale in days for restoring the tracer
+                                !!  reservior to external values on inflow
+  real :: trestore_outflow_days  !< The timescale in days for restoring the tracer
+                                !! reservior to external values on outflow
 end type ocean_OBC_type
 
 !> Control structure for open boundaries that read from files.
@@ -383,6 +391,20 @@ subroutine open_boundary_config(G, param_file, OBC)
                    units="nondim",  default=0.2)
     endif
   endif
+
+
+  if ((OBC%open_u_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally)) then
+     call get_param(param_file, mdl, "OBC_TRACER_INFLOW_RESTORE_DAYS", OBC%trestore_inflow_days, &
+                   "The timescale in days for restoring the tracer reservoir \n"//&
+                   "to external values when flowing into the model domain .", &
+                   units="days",  default=-1.0)
+     call get_param(param_file, mdl, "OBC_TRACER_OUTFLOW_RESTORE_DAYS", OBC%trestore_outflow_days, &
+                   "The timescale in days for restoring the tracer reservoir \n"//&
+                   "to external values when flowing from the model domain .", &
+                   units="days",  default=-1.0)
+  endif
+
+
 
     ! Safety check
   if ((OBC%open_u_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally) .and. &
@@ -2034,11 +2056,24 @@ subroutine update_OBC_segment_data(G, GV, OBC, tv, h, Time)
         enddo
       endif
 
+      ishift=0;jshift=0
       if (trim(segment%field(m)%name) == 'TEMP') then
         if (associated(segment%field(m)%buffer_dst)) then
           do k=1,nz; do j=js_obc, je_obc;do i=is_obc,ie_obc
             segment%tr_Reg%Tr(1)%t(i,j,k) = segment%field(m)%buffer_dst(i,j,k)
           enddo; enddo; enddo
+          if (associated(segment%tr_Reg%Tr(1)%volres)) then
+            if (segment%direction == OBC_DIRECTION_W) ishift=1
+            if (segment%direction == OBC_DIRECTION_S) jshift=1
+            ! The reservoir volume is set by the adjacent interior cell volume
+            do k=1,nz; do j=js_obc, je_obc;do i=is_obc,ie_obc
+              segment%tr_Reg%Tr(1)%volres(i,j,k) = G%areaT(i+ishift,j+jshift)*h(i+ishift,j+jshift,k)
+              if (associated(segment%tr_Reg%Tr(1)%tres)) then
+                if (segment%tr_Reg%Tr(1)%tres(i,j,k) <= 0.0) &
+                   segment%tr_Reg%Tr(1)%tres(i,j,k)=segment%tr_Reg%Tr(1)%t(i,j,k)
+              endif
+            enddo; enddo; enddo
+          endif
         else
           segment%tr_Reg%Tr(1)%OBC_inflow_conc = segment%field(m)%value
         endif
@@ -2047,6 +2082,18 @@ subroutine update_OBC_segment_data(G, GV, OBC, tv, h, Time)
           do k=1,nz; do j=js_obc, je_obc;do i=is_obc,ie_obc
             segment%tr_Reg%Tr(2)%t(i,j,k) = segment%field(m)%buffer_dst(i,j,k)
           enddo; enddo; enddo
+          if (associated(segment%tr_Reg%Tr(2)%volres)) then
+            if (segment%direction == OBC_DIRECTION_W) ishift=1
+            if (segment%direction == OBC_DIRECTION_S) jshift=1
+            ! The reservoir volume is set by the adjacent interior cell volume
+            do k=1,nz; do j=js_obc, je_obc;do i=is_obc,ie_obc
+              segment%tr_Reg%Tr(2)%volres(i,j,k) = G%areaT(i+ishift,j+jshift)*h(i+ishift,j+jshift,k)
+              if (associated(segment%tr_Reg%Tr(2)%tres)) then
+                 if (segment%tr_Reg%Tr(2)%tres(i,j,k) <= 0.0) &
+                      segment%tr_Reg%Tr(2)%tres(i,j,k)=segment%tr_Reg%Tr(2)%t(i,j,k)
+              endif
+            enddo; enddo; enddo
+          endif
         else
           segment%tr_Reg%Tr(2)%OBC_inflow_conc = segment%field(m)%value
         endif
@@ -2173,7 +2220,7 @@ subroutine segment_tracer_registry_init(param_file, segment)
 end subroutine segment_tracer_registry_init
 
 subroutine register_segment_tracer(tr_desc, param_file, GV, segment, tr_desc_ptr, &
-                                   OBC_scalar, OBC_array)
+                                   OBC_scalar, OBC_array, restore_in, restore_out)
   type(verticalGrid_type),        intent(in)    :: GV           !< ocean vertical grid structure
   type(vardesc),         intent(in)             :: tr_desc      !< metadata about the tracer
   type(param_file_type), intent(in)             :: param_file   !< file to parse for  model parameter values
@@ -2187,7 +2234,8 @@ subroutine register_segment_tracer(tr_desc, param_file, GV, segment, tr_desc_ptr
                                                                 !! available subsequently to the tracer registry.
   real, optional                                :: OBC_scalar   !< If present, use scalar value for segment tracer inflow concentration.
   logical, optional                             :: OBC_array    !< If true, use array values for segment tracer inflow concentration.
-
+  real, optional                                :: restore_in !< If present, the timesecale for restoring tracer to an external values (days)
+  real, optional                                :: restore_out !< If present, the timesecale for restoring tracer to an external values (days)
 
 ! Local variables
   integer :: ntseg
@@ -2227,8 +2275,28 @@ subroutine register_segment_tracer(tr_desc, param_file, GV, segment, tr_desc_ptr
   if (present(OBC_array)) then
     if (segment%is_E_or_W) then
       allocate(segment%tr_Reg%Tr(ntseg)%t(IsdB:IedB,jsd:jed,1:GV%ke))
+      allocate(segment%tr_Reg%Tr(ntseg)%tres(IsdB:IedB,jsd:jed,1:GV%ke))  ! additional storage for tracer reservoir
+      segment%tr_Reg%Tr(ntseg)%tres(:,:,:) = 0.0
+      allocate(segment%tr_Reg%Tr(ntseg)%volres(IsdB:IedB,jsd:jed,1:GV%ke))  ! additional storage for tracer reservoir
+      if (present(restore_in)) then
+        segment%tr_Reg%Tr(ntseg)%Idamp_in = 1.0 / (restore_in * 8.64e4)
+        segment%tr_Reg%Tr(ntseg)%Idamp_out = 1.0 / (restore_out * 8.64e4)
+      else
+        segment%tr_Reg%Tr(ntseg)%Idamp_in = -1.0
+        segment%tr_Reg%Tr(ntseg)%Idamp_out = -1.0
+      endif
     elseif (segment%is_N_or_S) then
       allocate(segment%tr_Reg%Tr(ntseg)%t(isd:ied,JsdB:JedB,1:GV%ke))
+      allocate(segment%tr_Reg%Tr(ntseg)%tres(isd:ied,JsdB:JedB,1:GV%ke)) ! additional storage for tracer reservoir
+      segment%tr_Reg%Tr(ntseg)%tres(:,:,:) = 0.0
+      allocate(segment%tr_Reg%Tr(ntseg)%volres(isd:ied,JsdB:JedB,1:GV%ke)) ! additional storage for tracer reservoir
+      if (present(restore_in)) then
+        segment%tr_Reg%Tr(ntseg)%Idamp_in = 1.0 / (restore_in * 8.64e4)
+        segment%tr_Reg%Tr(ntseg)%Idamp_out = 1.0 / (restore_out * 8.64e4)
+      else
+        segment%tr_Reg%Tr(ntseg)%Idamp_in = -1.0
+        segment%tr_Reg%Tr(ntseg)%Idamp_out = -1.0
+      endif
     endif
   endif
 
@@ -2272,9 +2340,11 @@ subroutine register_temp_salt_segments(GV, OBC, tv, vd_T, vd_S, param_file)
          call MOM_error(FATAL,"register_temp_salt_segments: tracer array was previously allocated")
 
     call register_segment_tracer(vd_T, param_file, GV, segment, &
-                                 OBC_array=segment%temp_segment_data_exists)
+                                 OBC_array=segment%temp_segment_data_exists,restore_in=OBC%trestore_inflow_days, &
+                                restore_out = OBC%trestore_outflow_days)
     call register_segment_tracer(vd_S, param_file, GV, segment, &
-                                 OBC_array=segment%salt_segment_data_exists)
+                                 OBC_array=segment%salt_segment_data_exists,restore_in=OBC%trestore_inflow_days, &
+                                restore_out = OBC%trestore_outflow_days)
   enddo
 
 end subroutine register_temp_salt_segments

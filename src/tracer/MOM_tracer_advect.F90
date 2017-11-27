@@ -350,6 +350,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   integer :: i, j, m, n, i_up, stencil
   real :: aR, aL, dMx, dMn, Tp, Tc, Tm, dA, mA, a6
   logical :: usePLMslope
+  real  :: I1pdamp, fc, damp
 
   usePLMslope = .not. (usePPM .and. useHuynh)
   ! stencil for calculating slope values
@@ -508,14 +509,48 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         if (OBC%segment(n)%is_E_or_W) then
           I = OBC%segment(n)%HI%IsdB
           if (j >= OBC%segment(n)%HI%jsd .and. j<= OBC%segment(n)%HI%jed) then
-            I = OBC%segment(n)%HI%IsdB
+            do m = 1, ntr
+              if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                 if ((uhr(I,j,k) <= 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow into a reservoir (probably at the west edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                    fc = -1.0*uhr(I,j,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(I,j,k)
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = Tr(m)%t(I,j,k)*fc + &
+                         OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)*(1.0-fc) + &
+                         I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir
+                    ! On outflow from reservoir, apply damping only
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + &
+                         damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i+1,j) < 0.5)) then  ! flow into a reservoir (probably at the east edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                    fc = uhr(I,j,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(I,j,k)
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = Tr(m)%t(I,j,k)*fc + &
+                         OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)*(1.0-fc) + &
+                         I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) <= .0) .and. (G%mask2dT(i+1,j) < 0.5)) then  ! flow into a reservoir (probably at the east edge of the domain)
+                    ! On outflow from reservoir, apply damping only
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + &
+                         damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 endif
+              endif
+            enddo
             ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
             if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
                 (uhr(I,j,k) < 0.0) .and. (G%mask2dT(i+1,j) < 0.5)) then
               uhh(I) = uhr(I,j,k)
               do m=1,ntr
-                if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t)) then
+                if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
                   flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k)
+                else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                  flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)
                 else ; flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
               enddo
             endif
@@ -530,10 +565,47 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         if (OBC%segment(n)%is_E_or_W) then
           I = OBC%segment(n)%HI%IsdB
           if (j >= OBC%segment(n)%HI%jsd .and. j<= OBC%segment(n)%HI%jed) then
+            do m = 1, ntr
+              if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                 if ((uhr(I,j,k) <= 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow into a reservoir (probably at the west edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                    fc = -1.0*uhr(I,j,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(I,j,k)
+                    if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_x OBC')
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = Tr(m)%t(I,j,k)*fc + &
+                         OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)*(1.0-fc) + &
+                         I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir
+                    ! On outflow from reservoir, apply damping only
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + &
+                         damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i+1,j) < 0.5)) then  ! flow into a reservoir (probably at the east edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                    fc = uhr(I,j,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(I,j,k)
+                    if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_x OBC')
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = Tr(m)%t(I,j,k)*fc + &
+                         OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)*(1.0-fc) + &
+                         I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 else if ((uhr(I,j,k) <= .0) .and. (G%mask2dT(i+1,j) < 0.5)) then  ! flow into a reservoir (probably at the east edge of the domain)
+                    ! On outflow from reservoir, apply damping only
+                    damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                    I1pdamp = (1.0) / (1.0 + damp)
+                    OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + &
+                         damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
+                 endif
+              endif
+            enddo
             uhh(I) = uhr(I,j,k)
             do m=1,ntr
-              if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t)) then
-                flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k)
+              if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                 flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k)
+              else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                 flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)
               else ; flux_x(I,m) = uhh(I)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
             enddo
           endif
@@ -541,8 +613,8 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
       enddo
     endif ; endif ; endif
 
-    ! Calculate new tracer concentration in each cell after accounting
-    ! for the i-direction fluxes.
+!    Calculate new tracer concentration in each cell after accounting
+!    for the i-direction fluxes.
     do I=is-1,ie
       uhr(I,j,k) = uhr(I,j,k) - uhh(I)
       if (abs(uhr(I,j,k)) < uh_neglect(I,j)) uhr(I,j,k) = 0.0
@@ -635,6 +707,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   integer :: i, j, j2, m, n, j_up, stencil
   real :: aR, aL, dMx, dMn, Tp, Tc, Tm, dA, mA, a6
   logical :: usePLMslope
+  real  :: I1pdamp, fc, damp
 
   usePLMslope = .not. (usePPM .and. useHuynh)
   ! stencil for calculating slope values
@@ -803,13 +876,52 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
         if (OBC%segment(n)%is_N_or_S) then
           if (J >= OBC%segment(n)%HI%JsdB .and. J<= OBC%segment(n)%HI%JedB) then
             do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
+
+              do m = 1, ntr
+                if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                  if ((vhr(i,J,k) <= 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow into a reservoir (probably at the south edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                     fc = -1.0*vhr(i,J,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(i,J,k)
+                     if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_y OBC')
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = Tr(m)%t(i,J,k)*fc + &
+                          OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)*(1.0-fc) + &
+                          I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir
+                     ! On outflow from reservoir, apply damping only
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + &
+                          damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then  ! flow into a reservoir (probably at the north edge of the domain)
+                     ! Diagnose tracer change in the reservoir due to advection and damping
+                     fc = vhr(i,J,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(i,J,k)
+                     if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_y OBC')
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = Tr(m)%t(i,J,k)*fc + &
+                          OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)*(1.0-fc) + &
+                          I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) <= .0) .and. (G%mask2dT(i,j+1) < 0.5)) then  ! flow into a reservoir (probably at the east edge of the domain)
+                     ! On outflow from reservoir, apply damping only
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + &
+                          damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  endif
+               endif
+             enddo
+
               ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
               if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
                   (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
                 vhh(i,J) = vhr(i,J,k)
                 do m=1,ntr
-                  if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t)) then
-                    flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
+                  if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
+                  else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
                   else ; flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
                 enddo
               endif
@@ -826,11 +938,57 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
           if (J >= OBC%segment(n)%HI%JsdB .and. J<= OBC%segment(n)%HI%JedB) then
             do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               vhh(i,J) = vhr(i,J,k)
-              do m=1,ntr
-                if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t)) then
-                  flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
-                else ; flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
-              enddo
+
+              do m = 1, ntr
+                if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                  if ((vhr(i,J,k) <= 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow into a reservoir (probably at the south edge of the domain)
+                    ! Diagnose tracer change in the reservoir due to advection and damping
+                     fc = -1.0*vhr(i,J,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(i,J,k)
+                     if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_y OBC')
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = Tr(m)%t(i,J,k)*fc + &
+                          OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)*(1.0-fc) + &
+                          I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir
+                     ! On outflow from reservoir, apply damping only
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + &
+                          damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then  ! flow into a reservoir (probably at the north edge of the domain)
+                     ! Diagnose tracer change in the reservoir due to advection and damping
+                     fc = vhr(i,J,k)/OBC%segment(n)%tr_Reg%Tr(m)%volres(i,J,k)
+                     if (fc > 1.0 .or. fc < 0.0) call MOM_error(FATAL,'advect_y OBC')
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_in
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = Tr(m)%t(i,J,k)*fc + &
+                          OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)*(1.0-fc) + &
+                          I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  else if ((vhr(i,J,k) <= .0) .and. (G%mask2dT(i,j+1) < 0.5)) then  ! flow into a reservoir (probably at the south edge of the domain)
+                     ! On outflow from reservoir, apply damping only
+                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
+                     I1pdamp = (1.0) / (1.0 + damp)
+                     OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k) = I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k) + &
+                          damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k))
+                  endif
+               endif
+             enddo
+
+!!!!!comment for testing mjh
+              ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
+!              if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
+!                  (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
+!                vhh(i,J) = vhr(i,J,k)
+!                do m=1,ntr
+!                  if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+!                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
+!                  else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+!                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
+!                  else ; flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
+!                enddo
+!              endif
+
             enddo
           endif
         endif
