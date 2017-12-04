@@ -519,7 +519,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
                     OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k) = Tr(m)%t(I,j,k)*fc + &
                          OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)*(1.0-fc) + &
                          I1pdamp * (OBC%segment(n)%tr_Reg%Tr(m)%t(I,j,k) + damp * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k))
-                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir
+                 else if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow from a reservoir (probably at the west edge)
                     ! On outflow from reservoir, apply damping only
                     damp = (1.0/Idt)*OBC%segment(n)%tr_Reg%Tr(m)%Idamp_out
                     I1pdamp = (1.0) / (1.0 + damp)
@@ -938,7 +938,6 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
           if (J >= OBC%segment(n)%HI%JsdB .and. J<= OBC%segment(n)%HI%JedB) then
             do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               vhh(i,J) = vhr(i,J,k)
-
               do m = 1, ntr
                 if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
                   if ((vhr(i,J,k) <= 0.0) .and. (G%mask2dT(i,j) < 0.5)) then  ! flow into a reservoir (probably at the south edge of the domain)
@@ -977,17 +976,17 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
 
 !!!!!comment for testing mjh
               ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
-!              if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
-!                  (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
-!                vhh(i,J) = vhr(i,J,k)
-!                do m=1,ntr
-!                  if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
-!                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
-!                  else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
-!                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
-!                  else ; flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
-!                enddo
-!              endif
+              if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
+                  (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
+                vhh(i,J) = vhr(i,J,k)
+                do m=1,ntr
+                  if (associated(OBC%segment(n)%tr_Reg%Tr(m)%t).and. .not. associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%t(i,J,k)
+                  else if (associated(OBC%segment(n)%tr_Reg%Tr(m)%tres)) then
+                     flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
+                  else ; flux_y(i,m,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
+                enddo
+              endif
 
             enddo
           endif
