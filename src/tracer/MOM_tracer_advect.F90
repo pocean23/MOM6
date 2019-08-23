@@ -651,7 +651,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
 
       ! update tracer
       do i=is,ie ; if ((do_i(i)) .and. (Ihnew(i) > 0.0)) then
-        Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) - &
+        Tr(m)%t(i,j,k) = (T_tmp(i,m) * hlst(i) - &
                           (flux_x(I,m) - flux_x(I-1,m))) * Ihnew(i)
       endif ; enddo
 
@@ -901,7 +901,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
         endif
 
         ! Implementation of PPM-H3
-        Tp = Tr(m)%t(i,j_up+1,k) ; Tc = Tr(m)%t(i,j_up,k) ; Tm = Tr(m)%t(i,j_up-1,k)
+        Tp = T_tmp(i,m,j_up+1) ; Tc = T_tmp(i,m,j_up) ; Tm = T_tmp(i,m,j_up-1)
 
         if (useHuynh) then
           aL = ( 5.*Tc + ( 2.*Tm - Tp ) )/6. ! H3 estimate
@@ -943,7 +943,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
          !aR = Tr(m)%t(i,j,k) + 0.5 * slope_y(i,m,j)
          !flux_y(i,m,J) = vhh(i,J)*(aR - 0.5 * slope_y(i,m,j)*CFL(i))
           ! Alternative implementation of PLM
-          Tc = Tr(m)%t(i,j,k)
+          Tc = T_tmp(i,m,j)
           flux_y(i,m,J) = vhh(i,J)*( Tc + 0.5 * slope_y(i,m,j) * ( 1. - CFL(i) ) )
           ! Original implementation of PLM
          !flux_y(i,m,J) = vhh(i,J)*(Tr(m)%t(i,j,k) + slope_y(i,m,j)*ts2(i))
@@ -956,7 +956,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
          !aL = Tr(m)%t(i,j+1,k) - 0.5 * slope_y(i,m,j+1)
          !flux_y(i,m,J) = vhh(i,J)*( aL + 0.5 * slope_y(i,m,j+1)*CFL(i) )
           ! Alternative implementation of PLM
-          Tc = Tr(m)%t(i,j+1,k)
+          Tc = T_tmp(i,m,j+1)
           flux_y(i,m,J) = vhh(i,J)*( Tc - 0.5 * slope_y(i,m,j+1) * ( 1. - CFL(i) ) )
           ! Original implementation of PLM
          !flux_y(i,m,J) = vhh(i,J)*(Tr(m)%t(i,j+1,k) - slope_y(i,m,j+1)*ts2(i))
@@ -1020,7 +1020,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
     ! update tracer and save some diagnostics
     do m=1,ntr
       do i=is,ie ; if (do_i(i)) then
-        Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) - &
+        Tr(m)%t(i,j,k) = (T_tmp(i,m,j) * hlst(i) - &
                           (flux_y(i,m,J) - flux_y(i,m,J-1))) * Ihnew(i)
       endif ; enddo
 
