@@ -4093,7 +4093,7 @@ subroutine adjustSegmentEtaToFitBathymetry(G, GV, US, segment,fld)
   type(verticalGrid_type),                    intent(in)    :: GV  !< The ocean's vertical grid structure
   type(unit_scale_type),                      intent(in)    :: US  !< A dimensional unit scaling type
   type(OBC_segment_type),                       intent(inout) :: segment !< pointer to segment type
-  integer,                                    intent(in)    :: fld
+  integer,                                    intent(in)    :: fld  !< field index to adjust thickness
   ! Local variables
   integer :: i, j, k, is, ie, js, je, nz, contractions, dilations
   integer :: n
