@@ -208,7 +208,7 @@ subroutine CorAdCalc(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS)
   real :: h_tiny        ! A very small thickness [H ~> m or kg m-2].
   real :: UHeff, VHeff  ! More temporary variables [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: QUHeff,QVHeff ! More temporary variables [H L2 T-1 s-1 ~> m3 s-2 or kg s-2].
-  integer :: i, j, k, n, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: i, j, k, n, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, i2, j2, i2p, j2p
 
 ! To work, the following fields must be set outside of the usual
 ! is to ie range before this subroutine is called:
@@ -295,6 +295,8 @@ subroutine CorAdCalc(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS)
           dudy(I,J) = 0.
         enddo ; endif
         if (OBC%computed_vorticity) then ; do I=OBC%segment(n)%HI%IsdB,OBC%segment(n)%HI%IedB
+          i2p=max(min(i+1,OBC%segment(n)%HI%ied),OBC%segment(n)%HI%isd);i2=max(min(i,OBC%segment(n)%HI%ied),OBC%segment(n)%HI%isd)
+          dvdx(I,J) = (Obc%segment(n)%normal_vel(i2p,J,k) - Obc%segment(n)%normal_vel(i2,J,k))
           if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
             dudy(I,J) = 2.0*(OBC%segment(n)%tangential_vel(I,J,k) - u(I,j,k))*G%dxCu(I,j)
           else ! (OBC%segment(n)%direction == OBC_DIRECTION_S)
@@ -335,6 +337,8 @@ subroutine CorAdCalc(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS)
           dvdx(I,J) = 0.
         enddo ; endif
         if (OBC%computed_vorticity) then ; do J=OBC%segment(n)%HI%JsdB,OBC%segment(n)%HI%JedB
+          j2p=max(min(j+1,OBC%segment(n)%HI%jed),OBC%segment(n)%HI%jsd);j2=max(min(j,OBC%segment(n)%HI%jed),OBC%segment(n)%HI%jsd)
+          dudy(I,J) = (Obc%segment(n)%normal_vel(I,j2p,k) - Obc%segment(n)%normal_vel(I,j2,k))
           if (OBC%segment(n)%direction == OBC_DIRECTION_E) then
             dvdx(I,J) = 2.0*(OBC%segment(n)%tangential_vel(I,J,k) - v(i,J,k))*G%dyCv(i,J)
           else ! (OBC%segment(n)%direction == OBC_DIRECTION_W)
