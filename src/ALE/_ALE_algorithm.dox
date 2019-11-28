@@ -1,5 +1,4 @@
-/*! \page ALE_algorithm ALE_algorithm
-\subsection ALE algorithm
+/*! \page ALE_algorithm ALE Algorithm
 
 The semi-discrete, vertically integrated, Boussinesq hydrostatic equations of
 motion in general-coordinate \f$r\f$ are
