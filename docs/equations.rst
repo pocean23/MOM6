@@ -12,7 +12,7 @@ algorithm.
 .. toctree::
     :maxdepth: 2
 
-    notation
-    governing
-    general_coordinate
-    ALE-algorithm
+    api/generated/pages/Notation
+    api/generated/pages/Governing
+    api/generated/pages/General_coordinate
+    api/generated/pages/ALE_algorithm

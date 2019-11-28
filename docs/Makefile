@@ -47,7 +47,7 @@ help:
 	@echo "  doctest    to run all doctests embedded in the documentation (if enabled)"
 
 clean:
-	rm -rf $(BUILDDIR)/*
+	rm -rf $(BUILDDIR)/* api/generated
 
 html:
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
@@ -187,4 +187,3 @@ Clean: clean
 	rm -rf _build APIs xml doxygen.log
 CLEAN: Clean
 	rm -rf doxygen src
-	rm -rf _build APIs src xml doxygen doxygen.log
