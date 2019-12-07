@@ -13,7 +13,10 @@ Contents:
 
   about
   equations
+  discrete
+  ALE
   parameterizations
+  tracers
   working_with_MOM6
   apiref
 

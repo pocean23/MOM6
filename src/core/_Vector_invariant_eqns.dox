@@ -1,4 +1,4 @@
-/*! \page Vector_invariant_eqns Vector Invariant Equations
+/*! \page Vector_Invariant_Equations Vector Invariant Equations
 
 MOM6 solves the momentum equations written in vector-invariant form.
 

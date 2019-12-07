@@ -1,4 +1,4 @@
-Equations
+Spatial Discretization
 =========
 
 The model equations are the layer-integrated vector-invariant form of the
@@ -12,7 +12,8 @@ algorithm.
 .. toctree::
     :maxdepth: 2
 
-    api/generated/pages/Notation
-    api/generated/pages/Governing_Equations
-    api/generated/pages/General_Coordinate
-    api/generated/pages/Vector_Invariant_Equations
+    api/generated/pages/Discrete_Grids
+    api/generated/pages/Finite_Difference_Operators
+    api/generated/pages/Discrete_Tracer
+    api/generated/pages/Discrete_Momentum
+    api/generated/pages/Energetic_Consistency
