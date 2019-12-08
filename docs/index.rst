@@ -13,8 +13,10 @@ Contents:
 
   about
   equations
-  discrete
+  discrete_space
+  discrete_time
   ALE
+  grids
   parameterizations
   tracers
   working_with_MOM6
