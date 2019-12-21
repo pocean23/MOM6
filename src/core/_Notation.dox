@@ -14,11 +14,11 @@ Horizontal components of velocity are indicated by \f$u\f$ and \f$v\f$ and verti
 
  \f[ \Phi = g z .\f]
 
-The thermodynamic state variables are usually salinity, :math:\f$S\f$, and potential temperature, :math:\f$\theta\f$ or the absolute salinity and conservative temperature, depending on the equation of state. :math:\f$\rho\f$ is in-situ density.
+The thermodynamic state variables are usually salinity, \f$S\f$, and potential temperature, \f$\theta\f$ or the absolute salinity and conservative temperature, depending on the equation of state. \f$\rho\f$ is in-situ density.
 
 \section vector_notation Vector notation
 
-The three-dimensional velocity vector is denoted :math:\f$\boldsymbol{v}\f$
+The three-dimensional velocity vector is denoted \f$\boldsymbol{v}\f$
 
   \f[\boldsymbol{v} = \boldsymbol{u} + \widehat{\boldsymbol{k}} w ,\f]
 

@@ -7,3 +7,5 @@ MOM6
 build/
 deps/
 MOM6.tags
+bib*.aux
+citelist.doc*

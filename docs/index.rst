@@ -15,10 +15,10 @@ Contents:
   equations
   discrete_space
   discrete_time
-  ALE
+  tracers
   grids
   parameterizations
-  tracers
+  other_physics
   working_with_MOM6
   apiref
 
