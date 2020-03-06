@@ -118,6 +118,7 @@ type, public :: OBC_segment_type
   logical :: nudged_grad    !< Optional supplement to nudge normal gradient of tangential velocity.
   logical :: specified      !< Boundary normal velocity fixed to external value.
   logical :: specified_tan  !< Boundary tangential velocity fixed to external value.
+  logical :: specified_grad !< Boundary gradient of tangential velocity fixed to external value.
   logical :: open           !< Boundary is open for continuity solver.
   logical :: gradient       !< Zero gradient at boundary.
   logical :: values_needed  !< Whether or not any external OBC fields are needed.
@@ -436,6 +437,7 @@ subroutine open_boundary_config(G, US, param_file, OBC)
       OBC%segment(l)%nudged_grad = .false.
       OBC%segment(l)%specified = .false.
       OBC%segment(l)%specified_tan = .false.
+      OBC%segment(l)%specified_grad = .false.
       OBC%segment(l)%open = .false.
       OBC%segment(l)%gradient = .false.
       OBC%segment(l)%values_needed = .false.
@@ -555,6 +557,7 @@ subroutine initialize_segment_data(G, OBC, PF)
   character(len=32)  :: remappingScheme
   character(len=256) :: mesg    ! Message for error messages.
   logical :: check_reconstruction, check_remapping, force_bounds_in_subcell
+  logical :: answers_2018, default_2018_answers
   integer, dimension(4) :: siz,siz2
   integer :: is, ie, js, je
   integer :: isd, ied, jsd, jed
@@ -591,14 +594,21 @@ subroutine initialize_segment_data(G, OBC, PF)
           "If true, the values on the intermediate grid used for remapping "//&
           "are forced to be bounded, which might not be the case due to "//&
           "round off.", default=.false.,do_not_log=.true.)
-    call get_param(PF, mdl, "BRUSHCUTTER_MODE", OBC%brushcutter_mode, &
+  call get_param(PF, mdl, "BRUSHCUTTER_MODE", OBC%brushcutter_mode, &
          "If true, read external OBC data on the supergrid.", &
          default=.false.)
+  call get_param(PF, mdl, "DEFAULT_2018_ANSWERS", default_2018_answers, &
+                 "This sets the default value for the various _2018_ANSWERS parameters.", &
+                 default=.true.)
+  call get_param(PF, mdl, "REMAPPING_2018_ANSWERS", answers_2018, &
+                 "If true, use the order of arithmetic and expressions that recover the "//&
+                 "answers from the end of 2018.  Otherwise, use updated and more robust "//&
+                 "forms of the same expressions.", default=default_2018_answers)
 
   allocate(OBC%remap_CS)
   call initialize_remapping(OBC%remap_CS, remappingScheme, boundary_extrapolation = .false., &
-       check_reconstruction=check_reconstruction, &
-       check_remapping=check_remapping, force_bounds_in_subcell=force_bounds_in_subcell)
+               check_reconstruction=check_reconstruction, check_remapping=check_remapping, &
+               force_bounds_in_subcell=force_bounds_in_subcell, answers_2018=answers_2018)
 
   if (OBC%user_BCs_set_globally) return
 
@@ -894,8 +904,8 @@ subroutine setup_u_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_y)
       OBC%segment(l_seg)%open = .true.
       OBC%Flather_u_BCs_exist_globally = .true.
       OBC%open_u_BCs_exist_globally = .true.
-      OBC%segment%z_values_needed = .true.
-      OBC%segment%u_values_needed = .true.
+      OBC%segment(l_seg)%z_values_needed = .true.
+      OBC%segment(l_seg)%u_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'ORLANSKI') then
       OBC%segment(l_seg)%radiation = .true.
       OBC%segment(l_seg)%open = .true.
@@ -923,14 +933,14 @@ subroutine setup_u_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_y)
     elseif (trim(action_str(a_loop)) == 'NUDGED') then
       OBC%segment(l_seg)%nudged = .true.
       OBC%nudged_u_BCs_exist_globally = .true.
-      OBC%segment%u_values_needed = .true.
+      OBC%segment(l_seg)%u_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'NUDGED_TAN') then
       OBC%segment(l_seg)%nudged_tan = .true.
       OBC%nudged_u_BCs_exist_globally = .true.
-      OBC%segment%v_values_needed = .true.
+      OBC%segment(l_seg)%v_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'NUDGED_GRAD') then
       OBC%segment(l_seg)%nudged_grad = .true.
-      OBC%segment%g_values_needed = .true.
+      OBC%segment(l_seg)%g_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'GRADIENT') then
       OBC%segment(l_seg)%gradient = .true.
       OBC%segment(l_seg)%open = .true.
@@ -938,9 +948,13 @@ subroutine setup_u_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_y)
     elseif (trim(action_str(a_loop)) == 'SIMPLE') then
       OBC%segment(l_seg)%specified = .true.
       OBC%specified_u_BCs_exist_globally = .true. ! This avoids deallocation
-      OBC%segment%u_values_needed = .true.
+      OBC%segment(l_seg)%u_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'SIMPLE_TAN') then
       OBC%segment(l_seg)%specified_tan = .true.
+      OBC%segment(l_seg)%v_values_needed = .true.
+    elseif (trim(action_str(a_loop)) == 'SIMPLE_GRAD') then
+      OBC%segment(l_seg)%specified_grad = .true.
+      OBC%segment(l_seg)%g_values_needed = .true.
     else
       call MOM_error(FATAL, "MOM_open_boundary.F90, setup_u_point_obc: "//&
                      "String '"//trim(action_str(a_loop))//"' not understood.")
@@ -1031,8 +1045,8 @@ subroutine setup_v_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_x)
       OBC%segment(l_seg)%open = .true.
       OBC%Flather_v_BCs_exist_globally = .true.
       OBC%open_v_BCs_exist_globally = .true.
-      OBC%segment%z_values_needed = .true.
-      OBC%segment%v_values_needed = .true.
+      OBC%segment(l_seg)%z_values_needed = .true.
+      OBC%segment(l_seg)%v_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'ORLANSKI') then
       OBC%segment(l_seg)%radiation = .true.
       OBC%segment(l_seg)%open = .true.
@@ -1060,14 +1074,14 @@ subroutine setup_v_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_x)
     elseif (trim(action_str(a_loop)) == 'NUDGED') then
       OBC%segment(l_seg)%nudged = .true.
       OBC%nudged_v_BCs_exist_globally = .true.
-      OBC%segment%v_values_needed = .true.
+      OBC%segment(l_seg)%v_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'NUDGED_TAN') then
       OBC%segment(l_seg)%nudged_tan = .true.
       OBC%nudged_v_BCs_exist_globally = .true.
-      OBC%segment%u_values_needed = .true.
+      OBC%segment(l_seg)%u_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'NUDGED_GRAD') then
       OBC%segment(l_seg)%nudged_grad = .true.
-      OBC%segment%g_values_needed = .true.
+      OBC%segment(l_seg)%g_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'GRADIENT') then
       OBC%segment(l_seg)%gradient = .true.
       OBC%segment(l_seg)%open = .true.
@@ -1075,9 +1089,13 @@ subroutine setup_v_point_obc(OBC, G, US, segment_str, l_seg, PF, reentrant_x)
     elseif (trim(action_str(a_loop)) == 'SIMPLE') then
       OBC%segment(l_seg)%specified = .true.
       OBC%specified_v_BCs_exist_globally = .true. ! This avoids deallocation
-      OBC%segment%v_values_needed = .true.
+      OBC%segment(l_seg)%v_values_needed = .true.
     elseif (trim(action_str(a_loop)) == 'SIMPLE_TAN') then
       OBC%segment(l_seg)%specified_tan = .true.
+      OBC%segment(l_seg)%u_values_needed = .true.
+    elseif (trim(action_str(a_loop)) == 'SIMPLE_GRAD') then
+      OBC%segment(l_seg)%specified_grad = .true.
+      OBC%segment(l_seg)%g_values_needed = .true.
     else
       call MOM_error(FATAL, "MOM_open_boundary.F90, setup_v_point_obc: "//&
                      "String '"//trim(action_str(a_loop))//"' not understood.")
@@ -1942,8 +1960,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
              dhdy = segment%grad_normal(J,1,k)
            endif
            if (dhdt*dhdx < 0.0) dhdt = 0.0
-           rx_new = dhdt*dhdx
            cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+           rx_new = min(dhdt*dhdx, cff_new*rx_max)
            ry_new = min(cff_new,max(dhdt*dhdy,-cff_new))
            if (gamma_u < 1.0) then
              rx_avg = (1.0-gamma_u)*segment%rx_norm_obl(I,j,k) + gamma_u*rx_new
@@ -2084,8 +2102,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
                  dhdy = segment%grad_tan(j+1,1,k)
                endif
                if (dhdt*dhdx < 0.0) dhdt = 0.0
-               rx_new = dhdt*dhdx
                cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+               rx_new = min(dhdt*dhdx, cff_new*rx_max)
                ry_new = min(cff_new,max(dhdt*dhdy,-cff_new))
                rx_tang_obl(I,j,k) = rx_new
                ry_tang_obl(i,J,k) = ry_new
@@ -2187,8 +2205,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
            endif
            if (dhdt*dhdx < 0.0) dhdt = 0.0
 
-           rx_new = dhdt*dhdx
            cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+           rx_new = min(dhdt*dhdx, cff_new*rx_max)
            ry_new = min(cff_new,max(dhdt*dhdy,-cff_new))
            if (gamma_u < 1.0) then
              rx_avg = (1.0-gamma_u)*segment%rx_norm_obl(I,j,k) + gamma_u*rx_new
@@ -2329,8 +2347,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
                  dhdy = segment%grad_tan(j+1,1,k)
                endif
                if (dhdt*dhdx < 0.0) dhdt = 0.0
-               rx_new = dhdt*dhdx
                cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+               rx_new = min(dhdt*dhdx, cff_new*rx_max)
                ry_new = min(cff_new,max(dhdt*dhdy,-cff_new))
                rx_tang_obl(I,j,k) = rx_new
                ry_tang_obl(i,J,k) = ry_new
@@ -2431,8 +2449,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
              dhdx = segment%grad_normal(I,1,k)
            endif
            if (dhdt*dhdy < 0.0) dhdt = 0.0
-           ry_new = dhdt*dhdy
            cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+           ry_new = min(dhdt*dhdy, cff_new*ry_max)
            rx_new = min(cff_new,max(dhdt*dhdx,-cff_new))
            if (gamma_u < 1.0) then
              rx_avg = (1.0-gamma_u)*segment%rx_norm_obl(I,j,k) + gamma_u*rx_new
@@ -2573,8 +2591,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
                  dhdx = segment%grad_tan(i+1,1,k)
                endif
                if (dhdt*dhdy < 0.0) dhdt = 0.0
-               ry_new = dhdt*dhdy
                cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+               ry_new = min(dhdt*dhdy, cff_new*ry_max)
                rx_new = min(cff_new,max(dhdt*dhdx,-cff_new))
                rx_tang_obl(I,j,k) = rx_new
                ry_tang_obl(i,J,k) = ry_new
@@ -2676,8 +2694,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
            endif
            if (dhdt*dhdy < 0.0) dhdt = 0.0
 
-           ry_new = dhdt*dhdy
            cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+           ry_new = min(dhdt*dhdy, cff_new*ry_max)
            rx_new = min(cff_new,max(dhdt*dhdx,-cff_new))
            if (gamma_u < 1.0) then
              rx_avg = (1.0-gamma_u)*segment%rx_norm_obl(I,j,k) + gamma_u*rx_new
@@ -2774,7 +2792,7 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
            enddo ; enddo
          endif
          if (segment%nudged_grad) then
-           do k=1,nz ; do J=segment%HI%JsdB,segment%HI%JedB
+           do k=1,nz ; do I=segment%HI%IsdB,segment%HI%IedB
              ! dhdt gets set to 0 on inflow in oblique case
              if (ry_tang_rad(I,J,k) <= 0.0) then
                tau = segment%Velocity_nudging_timescale_in
@@ -2818,8 +2836,8 @@ subroutine radiation_open_bdry_conds(OBC, u_new, u_old, v_new, v_old, G, US, dt)
                  dhdx = segment%grad_tan(i+1,1,k)
                endif
                if (dhdt*dhdy < 0.0) dhdt = 0.0
-               ry_new = dhdt*dhdy
                cff_new = max(dhdx*dhdx + dhdy*dhdy, eps)
+               ry_new = min(dhdt*dhdy, cff_new*ry_max)
                rx_new = min(cff_new,max(dhdt*dhdx,-cff_new))
                rx_tang_obl(I,j,k) = rx_new
                ry_tang_obl(i,J,k) = ry_new
@@ -3211,7 +3229,7 @@ subroutine allocate_OBC_segment_data(OBC, segment)
       allocate(segment%nudged_tangential_grad(IsdB:IedB,JsdB:JedB,OBC%ke)); segment%nudged_tangential_grad(:,:,:)=0.0
     endif
     if (OBC%specified_vorticity .or. OBC%specified_strain .or. segment%radiation_grad .or. &
-              segment%oblique_grad) then
+              segment%oblique_grad .or. segment%specified_grad) then
       allocate(segment%tangential_grad(IsdB:IedB,JsdB:JedB,OBC%ke)); segment%tangential_grad(:,:,:)=0.0
     endif
     if (segment%oblique) then
@@ -3254,7 +3272,7 @@ subroutine allocate_OBC_segment_data(OBC, segment)
       allocate(segment%nudged_tangential_grad(IsdB:IedB,JsdB:JedB,OBC%ke)); segment%nudged_tangential_grad(:,:,:)=0.0
     endif
     if (OBC%specified_vorticity .or. OBC%specified_strain .or. segment%radiation_grad .or. &
-              segment%oblique_grad) then
+              segment%oblique_grad .or. segment%specified_grad) then
       allocate(segment%tangential_grad(IsdB:IedB,JsdB:JedB,OBC%ke)); segment%tangential_grad(:,:,:)=0.0
     endif
     if (segment%oblique) then
@@ -3712,7 +3730,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
                   net_H_int = sum( h(i,j+jshift,:) )
                   scl_fac = net_H_int / net_H_src
                   call remapping_core_h(OBC%remap_CS, &
-                       segment%field(m)%nk_src,segment%field(m)%dz_src(i,J,:), &
+                       segment%field(m)%nk_src, scl_fac*segment%field(m)%dz_src(i,J,:), &
                        segment%field(m)%buffer_src(i,J,:), &
                        G%ke, h(i,j+jshift,:), segment%field(m)%buffer_dst(i,J,:))
                 endif
@@ -3761,8 +3779,9 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
         endif
       endif
 
-      if (trim(segment%field(m)%name) == 'U' .or. trim(segment%field(m)%name) == 'V') then
-        if (segment%field(m)%fid>0) then ! calculate external BT velocity and transport if needed
+      if (segment%field(m)%fid>0) then
+        ! calculate external BT velocity and transport if needed
+        if (trim(segment%field(m)%name) == 'U' .or. trim(segment%field(m)%name) == 'V') then
           if (trim(segment%field(m)%name) == 'U' .and. segment%is_E_or_W) then
             I=is_obc
             do j=js_obc+1,je_obc
@@ -3809,23 +3828,27 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               if (associated(segment%nudged_tangential_vel)) &
                 segment%nudged_tangential_vel(I,J,:) = segment%tangential_vel(I,J,:)
             enddo
-          elseif (trim(segment%field(m)%name) == 'DVDX' .and. segment%is_E_or_W .and. &
-                  associated(segment%tangential_grad)) then
-            I=is_obc
-            do J=js_obc,je_obc
-              do k=1,G%ke
-                segment%tangential_grad(I,J,k) = US%T_to_s*segment%field(m)%buffer_dst(I,J,k)
-              enddo
-            enddo
-          elseif (trim(segment%field(m)%name) == 'DUDY' .and. segment%is_N_or_S .and. &
-                  associated(segment%tangential_grad)) then
-            J=js_obc
-            do I=is_obc,ie_obc
-              do k=1,G%ke
-                segment%tangential_grad(I,J,k) = US%T_to_s*segment%field(m)%buffer_dst(I,J,k)
-              enddo
-            enddo
           endif
+        elseif (trim(segment%field(m)%name) == 'DVDX' .and. segment%is_E_or_W .and. &
+                associated(segment%tangential_grad)) then
+          I=is_obc
+          do J=js_obc,je_obc
+            do k=1,G%ke
+              segment%tangential_grad(I,J,k) = US%T_to_s*segment%field(m)%buffer_dst(I,J,k)
+              if (associated(segment%nudged_tangential_grad)) &
+                segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
+            enddo
+          enddo
+        elseif (trim(segment%field(m)%name) == 'DUDY' .and. segment%is_N_or_S .and. &
+                associated(segment%tangential_grad)) then
+          J=js_obc
+          do I=is_obc,ie_obc
+            do k=1,G%ke
+              segment%tangential_grad(I,J,k) = US%T_to_s*segment%field(m)%buffer_dst(I,J,k)
+              if (associated(segment%nudged_tangential_grad)) &
+                segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
+            enddo
+          enddo
         endif
       endif
 

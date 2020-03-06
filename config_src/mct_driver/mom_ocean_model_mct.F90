@@ -279,8 +279,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
                       input_restart_file=input_restart_file, &
                       diag_ptr=OS%diag, count_calls=.true.)
   call get_MOM_state_elements(OS%MOM_CSp, G=OS%grid, GV=OS%GV, US=OS%US, C_p=OS%C_p, &
-                              use_temp=use_temperature)
-  OS%fluxes%C_p = OS%C_p
+                              C_p_scaled=OS%fluxes%C_p, use_temp=use_temperature)
 
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, mdl, version, "")
@@ -515,7 +514,7 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     call enable_averaging(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag)
 
     if (do_thermo) &
-      call convert_IOB_to_fluxes(Ice_ocean_boundary, OS%fluxes, index_bnds, OS%Time, &
+      call convert_IOB_to_fluxes(Ice_ocean_boundary, OS%fluxes, index_bnds, OS%Time, dt_coupling, &
                                OS%grid, OS%US, OS%forcing_CSp, OS%sfc_state, &
                                OS%restore_salinity, OS%restore_temp)
 
@@ -528,7 +527,7 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     endif
     if (OS%icebergs_alter_ocean)  then
       if (do_dyn) &
-        call iceberg_forces(OS%grid, OS%US, OS%forces, OS%use_ice_shelf, &
+        call iceberg_forces(OS%grid, OS%forces, OS%use_ice_shelf, &
                             OS%sfc_state, dt_coupling, OS%marine_ice_CSp)
       if (do_thermo) &
         call iceberg_fluxes(OS%grid, OS%US, OS%fluxes, OS%use_ice_shelf, &
@@ -543,16 +542,12 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, weight) !here weight=1, just saving the current fluxes
 #endif
 
-    ! Indicate that there are new unused fluxes.
-    OS%fluxes%fluxes_used = .false.
-    OS%fluxes%dt_buoy_accum = dt_coupling
-
   else
 
     OS%flux_tmp%C_p = OS%fluxes%C_p
 
     if (do_thermo) &
-      call convert_IOB_to_fluxes(Ice_ocean_boundary, OS%flux_tmp, index_bnds, OS%Time, &
+      call convert_IOB_to_fluxes(Ice_ocean_boundary, OS%flux_tmp, index_bnds, OS%Time, dt_coupling, &
                                OS%grid, OS%US, OS%forcing_CSp, OS%sfc_state, OS%restore_salinity,OS%restore_temp)
 
     if (OS%use_ice_shelf) then
@@ -566,11 +561,11 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
         call iceberg_forces(OS%grid, OS%forces, OS%use_ice_shelf, &
                             OS%sfc_state, dt_coupling, OS%marine_ice_CSp)
       if (do_thermo) &
-        call iceberg_fluxes(OS%grid, OS%flux_tmp, OS%use_ice_shelf, &
+        call iceberg_fluxes(OS%grid, OS%US, OS%flux_tmp, OS%use_ice_shelf, &
                           OS%sfc_state, dt_coupling, OS%marine_ice_CSp)
     endif
 
-    call forcing_accumulate(OS%flux_tmp, OS%forces, OS%fluxes, dt_coupling, OS%grid, weight)
+    call forcing_accumulate(OS%flux_tmp, OS%forces, OS%fluxes, OS%grid, weight)
 
     ! Some of the fields that exist in both the forcing and mech_forcing types
     ! (e.g., ustar) are time-averages must be copied back to the forces type.
@@ -669,15 +664,10 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
   OS%Time = Master_time + Ocean_coupling_time_step
   OS%nstep = OS%nstep + 1
 
-  call enable_averaging(dt_coupling, OS%Time, OS%diag)
-  call mech_forcing_diags(OS%forces, dt_coupling, OS%grid, OS%diag, OS%forcing_CSp%handles)
-  call disable_averaging(OS%diag)
+  call mech_forcing_diags(OS%forces, dt_coupling, OS%grid, OS%Time, OS%diag, OS%forcing_CSp%handles)
 
   if (OS%fluxes%fluxes_used) then
-    call enable_averaging(OS%fluxes%dt_buoy_accum, OS%Time, OS%diag)
-    call forcing_diagnostics(OS%fluxes, OS%sfc_state, OS%fluxes%dt_buoy_accum, &
-                             OS%grid, OS%US, OS%diag, OS%forcing_CSp%handles)
-    call disable_averaging(OS%diag)
+    call forcing_diagnostics(OS%fluxes, OS%sfc_state, OS%grid, OS%US, OS%Time, OS%diag, OS%forcing_CSp%handles)
   endif
 
 ! Translate state into Ocean.
@@ -922,7 +912,7 @@ subroutine convert_state_to_ocean_type(sfc_state, Ocean_sfc, G, US, patm, press_
     enddo ; enddo
   endif
 
-  if (associated(sfc_state%frazil)) then
+  if (allocated(sfc_state%frazil)) then
     do j=jsc_bnd,jec_bnd ; do i=isc_bnd,iec_bnd
       Ocean_sfc%frazil(i,j) = sfc_state%frazil(i+i0,j+j0)
     enddo ; enddo

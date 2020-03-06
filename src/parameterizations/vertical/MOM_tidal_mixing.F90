@@ -142,6 +142,9 @@ type, public :: tidal_mixing_cs
   real                            :: tidal_diss_lim_tc  !< CVMix-specific dissipation limit depth for
                                                         !! tidal-energy-constituent data [Z ~> m].
   type(remapping_CS)              :: remap_CS           !< The control structure for remapping
+  logical :: remap_answers_2018 = .true.  !< If true, use the order of arithmetic and expressions that
+                                       !! recover the remapping answers from 2018.  If false, use more
+                                       !! robust forms of the same remapping expressions.
 
   ! Data containers
   real, pointer, dimension(:,:) :: TKE_Niku    => NULL() !< Lee wave driven Turbulent Kinetic Energy input
@@ -267,6 +270,10 @@ logical function tidal_mixing_init(Time, G, GV, US, param_file, diag, CS)
                  "This sets the default value for the various _2018_ANSWERS parameters.", &
                  default=.true.)
   call get_param(param_file, mdl, "TIDAL_MIXING_2018_ANSWERS", CS%answers_2018, &
+                 "If true, use the order of arithmetic and expressions that recover the "//&
+                 "answers from the end of 2018.  Otherwise, use updated and more robust "//&
+                 "forms of the same expressions.", default=default_2018_answers)
+  call get_param(param_file, mdl, "REMAPPING_2018_ANSWERS", CS%remap_answers_2018, &
                  "If true, use the order of arithmetic and expressions that recover the "//&
                  "answers from the end of 2018.  Otherwise, use updated and more robust "//&
                  "forms of the same expressions.", default=default_2018_answers)
@@ -597,7 +604,7 @@ logical function tidal_mixing_init(Time, G, GV, US, param_file, diag, CS)
     else
       CS%id_TKE_itidal = register_diag_field('ocean_model','TKE_itidal',diag%axesT1,Time, &
           'Internal Tide Driven Turbulent Kinetic Energy', &
-          'W m-2', conversion=(US%R_to_kg_m3*US%Z_to_m**3*US%s_to_T**3))
+          'W m-2', conversion=US%RZ3_T3_to_W_m2)
       CS%id_Nb = register_diag_field('ocean_model','Nb',diag%axesT1,Time, &
            'Bottom Buoyancy Frequency', 's-1', conversion=US%s_to_T)
 
@@ -630,20 +637,20 @@ logical function tidal_mixing_init(Time, G, GV, US, param_file, diag, CS)
 
       CS%id_Kd_Itidal_Work = register_diag_field('ocean_model','Kd_Itidal_Work',diag%axesTL,Time, &
            'Work done by Internal Tide Diapycnal Mixing', &
-           'W m-2', conversion=(US%R_to_kg_m3*US%Z_to_m**3*US%s_to_T**3))
+           'W m-2', conversion=US%RZ3_T3_to_W_m2)
 
       CS%id_Kd_Niku_Work = register_diag_field('ocean_model','Kd_Nikurashin_Work',diag%axesTL,Time, &
            'Work done by Nikurashin Lee Wave Drag Scheme', &
-           'W m-2', conversion=(US%R_to_kg_m3*US%Z_to_m**3*US%s_to_T**3))
+           'W m-2', conversion=US%RZ3_T3_to_W_m2)
 
       CS%id_Kd_Lowmode_Work = register_diag_field('ocean_model','Kd_Lowmode_Work',diag%axesTL,Time, &
            'Work done by Internal Tide Diapycnal Mixing (low modes)', &
-           'W m-2', conversion=(US%R_to_kg_m3*US%Z_to_m**3*US%s_to_T**3))
+           'W m-2', conversion=US%RZ3_T3_to_W_m2)
 
       if (CS%Lee_wave_dissipation) then
         CS%id_TKE_leewave = register_diag_field('ocean_model','TKE_leewave',diag%axesT1,Time, &
             'Lee wave Driven Turbulent Kinetic Energy', &
-            'W m-2', conversion=(US%R_to_kg_m3*US%Z_to_m**3*US%s_to_T**3))
+            'W m-2', conversion=US%RZ3_T3_to_W_m2)
         CS%id_Kd_Niku = register_diag_field('ocean_model','Kd_Nikurashin',diag%axesTi,Time, &
             'Lee Wave Driven Diffusivity', 'm2 s-1', conversion=US%Z2_T_to_m2_s)
       endif
@@ -735,7 +742,6 @@ subroutine calculate_CVMix_tidal(h, j, G, GV, US, CS, N2_int, Kd_lay, Kv)
   real :: dh, hcorr, Simmons_coeff
   real, parameter :: rho_fw = 1000.0 ! fresh water density [kg/m^3]
                                      ! TODO: when coupled, get this from CESM (SHR_CONST_RHOFW)
-  real :: h_neglect, h_neglect_edge
   type(tidal_mixing_diags), pointer :: dd => NULL()
 
   is  = G%isc ; ie  = G%iec
@@ -824,12 +830,6 @@ subroutine calculate_CVMix_tidal(h, j, G, GV, US, CS, N2_int, Kd_lay, Kv)
     ! and CVMix_compute_SchmittnerCoeff low subroutines
 
     allocate(exp_hab_zetar(G%ke+1,G%ke+1))
-    if (GV%Boussinesq) then
-      h_neglect = GV%m_to_H*1.0e-30 ; h_neglect_edge = GV%m_to_H*1.0e-10
-    else
-      h_neglect = GV%kg_m2_to_H*1.0e-30 ; h_neglect_edge = GV%kg_m2_to_H*1.0e-10
-    endif
-
 
     do i=is,ie
 
@@ -1294,10 +1294,17 @@ subroutine add_int_tide_diffusivity(h, N2_bot, j, TKE_to_Kd, max_TKE, G, GV, US,
     do k=nz-1,2,-1 ; do i=is,ie
       if (max_TKE(i,k) <= 0.0) cycle
       z_from_bot(i) = z_from_bot(i) + GV%H_to_Z*h(i,j,k)
-      if (N2_meanz(i) > 1.0e-14*US%T_to_s**2 ) then
-        z_from_bot_WKB(i) = z_from_bot_WKB(i) &
-            + GV%H_to_Z * h(i,j,k) * N2_lay(i,k) / N2_meanz(i)
-      else ; z_from_bot_WKB(i) = 0 ; endif
+      if (CS%answers_2018) then
+        if (N2_meanz(i) > 1.0e-14*US%T_to_s**2 ) then
+          z_from_bot_WKB(i) = z_from_bot_WKB(i) &
+              + GV%H_to_Z * h(i,j,k) * N2_lay(i,k) / N2_meanz(i)
+        else ; z_from_bot_WKB(i) = 0 ; endif
+      else
+        if (GV%H_to_Z*h(i,j,k) * N2_lay(i,k) < (1.0e14 * htot_WKB(i)) * N2_meanz(i)) then
+          z_from_bot_WKB(i) = z_from_bot_WKB(i) + &
+             GV%H_to_Z*h(i,j,k) * N2_lay(i,k) / N2_meanz(i)
+        endif
+      endif
 
       ! Fraction of bottom flux predicted to reach top of this layer
       TKE_frac_top(i)     = ( Inv_int(i) * z0_polzin_scaled(i) ) / &
@@ -1659,7 +1666,8 @@ subroutine read_tidal_constituents(G, US, tidal_energy_file, CS)
 
   ! initialize input remapping:
   call initialize_remapping(CS%remap_cs, remapping_scheme="PLM", &
-                            boundary_extrapolation=.false., check_remapping=CS%debug)
+                            boundary_extrapolation=.false., check_remapping=CS%debug, &
+                            answers_2018=CS%remap_answers_2018)
 
   deallocate(tc_m2)
   deallocate(tc_s2)
