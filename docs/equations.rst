@@ -16,3 +16,4 @@ algorithm, taken from \cite Adcroft2019.
     api/generated/pages/Governing_Equations
     api/generated/pages/General_Coordinate
     api/generated/pages/Specifics
+    api/generated/pages/ALE

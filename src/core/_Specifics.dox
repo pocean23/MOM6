@@ -39,7 +39,7 @@ Volume conservation appears in the form of a prognostic flux-form layer thicknes
 \f[
 h = \frac{\partial z}{\partial r} \, \mathrm{d}r,
 \f]
-where \f$\mathrm{d}r\f$ is the thickness of a layer in \f$r-\f$space (e.g., the
+where \f$\mathrm{d}r\f$ is the thickness of a layer in \f$r\f$-space (e.g., the
 density difference between target density classes or the thickness between
 target depths). The layer thickness increases where horizontal thickness
 fluxes converge, \f$\nabla_r \cdot \left( h_k \, \mathbf{u} \right) < 0\f$,
